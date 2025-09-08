@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>IoT Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="{{ url_for('static', filename='script.js') }}" defer></script>
+</head>
+<body>
+    <h1>IoT Assembly Line Dashboard</h1>
+
+    <!-- Control Buttons -->
+    <div id="controls" style="margin-bottom: 20px;">
+        <h2>Control Panel</h2>
+        <button id="start-sensor">Start Sensor</button>
+        <button id="stop-sensor">Stop Sensor</button>
+        <button id="start-inspector">Start Inspector</button>
+        <button id="stop-inspector">Stop Inspector</button>
+        <button id="retrain-model-btn">Retrain Model</button>
+        <button id="reset-model-btn">Reset Model</button>
+        <button id="wipe-db-btn">Wipe Database</button>
+    </div>
+
+    <!-- Status message -->
+    <p id="status"></p>
+
+    <!-- Scrollable table container -->
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Temp</th>
+                    <th>Humidity</th>
+                    <th>Sound</th>
+                    <th>Predicted</th>
+                    <th>Real</th>
+                    <th>Accuracy</th>
+                    <th>Timestamp</th>
+                </tr>
+            </thead>
+            <tbody id="prediction-table-body">
+                <!-- Rows will be injected by JavaScript -->
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
