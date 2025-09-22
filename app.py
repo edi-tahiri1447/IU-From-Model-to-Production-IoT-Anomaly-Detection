@@ -1,11 +1,8 @@
-from flask import Flask, request, jsonify, render_template, redirect
+from flask import Flask, request, jsonify, render_template
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
 
 import os
-import sys
-import subprocess
-
 
 import pandas as pd
 import numpy as np
@@ -16,12 +13,14 @@ from sklearn.preprocessing import StandardScaler
 
 import pickle
 
-
 app = Flask(__name__)
 
-# DB config
-app.config['SQLALCHEMY_DATABASE_URI'] = "postgresql://postgres:1234@localhost:5432/iotdb"
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
+    "DATABASE_URL",
+    "postgresql+psycopg2://postgres:postgres@localhost:5432/iot_db"
+)
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
 db = SQLAlchemy(app)
 
 # Define table
@@ -44,36 +43,61 @@ class Product(db.Model):
     accuracy_at_timestamp = db.Column(db.Float, nullable=True)
 
 
-# Ensure table exists
-with app.app_context():
-    db.create_all()
+class ServiceControl(db.Model):
+    __tablename__ = "service_control"
+    name = db.Column(db.String, primary_key=True)
+    running = db.Column(db.Boolean, default=False)
 
-# At the start, check if models directory exists; if not, make one
-if not os.path.exists(r"./models"):
-    os.makedirs(r"./models")
-# If models folder is empty: train initial model from init_data.csv, then pickle it
-if not os.listdir(r"./models"):
-    init_data = pd.read_csv("data/init_data.csv")
 
-    X_train = init_data[["temp", "humidity", "sound_volume"]]
-    y_train = init_data["label"]
+def init_service_control():
+    for name in ["sensor", "inspector"]:
+        svc = ServiceControl.query.filter_by(name=name).first()
+        if not svc:
+            svc = ServiceControl(name=name, running=False)
+            db.session.add(svc)
+    db.session.commit()
 
-    clf = make_pipeline(
-        StandardScaler(),
-        RandomForestClassifier(
-            n_estimators=200,
-            class_weight="balanced",
-            random_state=42
+
+def init_model():
+    # At the start, check if models directory exists; if not, make one
+    if not os.path.exists(r"./models"):
+        os.makedirs(r"./models")
+
+    # If models folder is empty: train initial model from init_data.csv, then pickle it
+    if not os.listdir(r"./models"):
+        init_data = pd.read_csv("data/init_data.csv")
+
+        X_train = init_data[["temp", "humidity", "sound_volume"]].to_numpy()
+        y_train = init_data["label"].to_numpy()
+
+        clf = make_pipeline(
+            StandardScaler(),
+            RandomForestClassifier(
+                n_estimators=200,
+                class_weight="balanced",
+                random_state=42
+            )
         )
-    )
-    clf.fit(X_train, y_train)
+        clf.fit(X_train, y_train)
 
-    # Save the whole pipeline
-    with open("models/model.pkl", "wb") as f:
-        pickle.dump(clf, f)
+        # Save the whole pipeline
+        with open("models/model.pkl", "wb") as f:
+            pickle.dump(clf, f)
 
-with open("models/model.pkl", "rb") as f:
-    clf = pickle.load(f)
+    with open("models/model.pkl", "rb") as f:
+        clf = pickle.load(f)
+    return clf
+
+
+def setup_app():
+    with app.app_context():
+        db.create_all()
+        init_service_control()
+        
+        global clf
+        clf = init_model()
+
+setup_app()
 
 
 @app.route("/predict", methods=["POST"])
@@ -83,7 +107,7 @@ def predict():
     features = np.array([[data["temp"], data["humidity"], data["sound_volume"]]])
     prediction = clf.predict(features)[0]
 
-    print(f"Received features: temp: {data["temp"]}, humidity: {data["humidity"]}, sound volume: {data["sound_volume"]}.")
+    print(f"Received features: temp: {data['temp']}, humidity: {data['humidity']}, sound volume: {data['sound_volume']}.")
     print(f"Predicted: {prediction}")
 
     prediction_in_db = Product(
@@ -157,57 +181,58 @@ def next_unlabeled():
         return {"id": 1}
     
 
-# Creating endpoints to start/stop sensor_sim.py and inspector_sim.py (with buttons) for easy simulation
-sensor_process = None
-inspector_process = None
+@app.route("/status_sensor", methods=["GET"])
+def status_sensor():
+    sensor = db.session.get(ServiceControl, "sensor")
+    status = "on" if sensor.running else "off"
+    return jsonify({"status": status})
+
+
+@app.route("/status_inspector", methods=["GET"])
+def status_inspector():
+    inspector = db.session.get(ServiceControl, "inspector")
+    status = "on" if inspector.running else "off"
+    return jsonify({"status": status})
 
 
 @app.route("/start_sensor", methods=["POST"])
 def start_sensor():
-    global sensor_process
-    if sensor_process is None or sensor_process.poll() is not None:
-        sensor_process = subprocess.Popen([sys.executable, "sensor_sim.py"])
-
-        return {"status": "Sensor simulator started."}
-    else:
-        return {"status": "Sensor simulator is already running."}
+    sensor = db.session.get(ServiceControl, "sensor")
+    if sensor:
+        sensor.running = True
+        db.session.commit()
+        return jsonify({"status": "Sensor start signal sent."})
+    return jsonify({"status": "Sensor not found"}), 404
 
 
 @app.route("/stop_sensor", methods=["POST"])
 def stop_sensor():
-    global sensor_process
-    if sensor_process is not None and sensor_process.poll() is None:
-        sensor_process.terminate()
-        sensor_process = None
-
-        return {"status": "Sensor simulator stopped."}
-    else:
-        return {"status": "Sensor simulator is not running."}
+    sensor = db.session.get(ServiceControl, "sensor")
+    if sensor:
+        sensor.running = False
+        db.session.commit()
+        return jsonify({"status": "Sensor stop signal sent."})
+    return jsonify({"status": "Sensor not found"}), 404
 
 
 @app.route("/start_inspector", methods=["POST"])
 def start_inspector():
-    global inspector_process
-
-    if inspector_process is None or inspector_process.poll() is not None:
-        inspector_process = subprocess.Popen([sys.executable, "inspector_sim.py"])
-
-        return {"status": "Inspector simulator started."}
-    else:
-        return {"status": "Inspector simulator is already running."}
+    inspector = db.session.get(ServiceControl, "inspector")
+    if inspector:
+        inspector.running = True
+        db.session.commit()
+        return jsonify({"status": "Inspector start signal sent."})
+    return jsonify({"status": "Inspector not found"}), 404
 
 
 @app.route("/stop_inspector", methods=["POST"])
 def stop_inspector():
-    global inspector_process
-
-    if inspector_process is not None and inspector_process.poll() is None:
-        inspector_process.terminate()
-        inspector_process = None
-
-        return {"status": "Inspector simulator stopped."}
-    else:
-        return {"status": "Inspector simulator is not running."}
+    inspector = db.session.get(ServiceControl, "inspector")
+    if inspector:
+        inspector.running = False
+        db.session.commit()
+        return jsonify({"status": "Inspector stop signal sent."})
+    return jsonify({"status": "Inspector not found"}), 404
 
 
 @app.route("/retrain_model", methods=["POST"])
@@ -328,12 +353,4 @@ def favicon():
 
 
 if __name__ == "__main__":
-    import webbrowser
-    import threading
-
-    # Open the dashboard in the default browser after a short delay
-    def open_browser():
-        webbrowser.open_new("http://127.0.0.1:5000/monitor")
-
-    threading.Timer(1.0, open_browser).start()  # 1 second delay
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(debug=True, host="0.0.0.0", port=8000)

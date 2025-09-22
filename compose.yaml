@@ -1,0 +1,35 @@
+services:
+  iot_dashboard:
+    build: .
+    ports:
+      - "8000:8000"   # host:container
+    depends_on:
+      - iot_db
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@iot_db:5432/iotdb
+
+  iot_db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: iotdb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  sensor_sim:
+    build: .
+    command: python sensor_sim.py
+    depends_on:
+      - iot_dashboard
+      - iot_db
+
+  inspector_sim:
+    build: .
+    command: python inspector_sim.py
+    depends_on:
+      - iot_dashboard
+      - iot_db
+
+volumes:
+  postgres_data:
