@@ -11,6 +11,10 @@ Also contains the dataset in .csv form, as well as the script used to generate t
 - A machine learning model that can be dynamically retrained on new, labelled data, at the push of a button
 - A web dashboard that loads the products, their features, the prediction, and live accuracy
 
+## Requirements
+- [Docker](https://docs.docker.com/get-docker/)
+- [Docker Compose](https://docs.docker.com/compose/install/)
+
 ## Installation
 
 This app is dockerized. Simply clone the github repository:
